@@ -5,11 +5,11 @@ import random
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import google.generativeai as genai
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from groq import Groq
 
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env.local'))
 
 app = FastAPI()
 app.add_middleware(
@@ -19,39 +19,17 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# --- FALLBACK CHAIN SETUP ---
-_API_KEYS = [
-    os.getenv("GEMINI_API_KEY_1"),
-    os.getenv("GEMINI_API_KEY_2"),
-    os.getenv("GEMINI_API_KEY_3"),
-    os.getenv("GEMINI_API_KEY_4"),
-    os.getenv("GEMINI_API_KEY_5"),
-    os.getenv("GEMINI_API_KEY_6"),
-    os.getenv("GEMINI_API_KEY_7"),
-]
-API_KEYS = [k for k in _API_KEYS if k]
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+print(f"[NeuroSEO] Groq client loaded.")
 
-if not API_KEYS:
-    raise RuntimeError("No Gemini API keys found. Set GEMINI_API_KEY_1 in your .env")
-
-random.shuffle(API_KEYS)
-print(f"[NeuroSEO] Loaded {len(API_KEYS)} Gemini API key(s).")
-
-MODEL_NAME = "gemini-1.5-flash"
-
-def call_gemini(prompt: str) -> str:
-    last_error = None
-    for i, key in enumerate(API_KEYS):
-        try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(MODEL_NAME)
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            print(f"[NeuroSEO] Key {i+1} failed: {type(e).__name__}: {e}")
-            last_error = e
-            continue
-    raise Exception(f"All {len(API_KEYS)} API keys exhausted. Last error: {last_error}")
+def call_groq(prompt: str) -> str:
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=4096,
+    )
+    return response.choices[0].message.content
 
 
 # --- MODELS ---
@@ -112,7 +90,7 @@ async def analyze_url(request: AuditRequest):
     3. MITIGATION: Do not use generic text. Provide the exact HTML/JS/CSS code the user needs.
     """
     try:
-        raw_text = call_gemini(prompt).strip().replace('```json', '').replace('```', '')
+        raw_text = call_groq(prompt).strip().replace('```json', '').replace('```', '')
         return json.loads(raw_text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -132,7 +110,7 @@ async def analyze_sandbox(request: SandboxRequest):
     }}
     """
     try:
-        raw_text = call_gemini(prompt).strip()
+        raw_text = call_groq(prompt).strip()
         if "```json" in raw_text:
             raw_text = raw_text.split("```json")[1].split("```")[0].strip()
         elif "```" in raw_text:
