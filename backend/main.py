@@ -24,20 +24,22 @@ _API_KEYS = [
     os.getenv("GEMINI_API_KEY_1"),
     os.getenv("GEMINI_API_KEY_2"),
     os.getenv("GEMINI_API_KEY_3"),
+    os.getenv("GEMINI_API_KEY_4"),
+    os.getenv("GEMINI_API_KEY_5"),
+    os.getenv("GEMINI_API_KEY_6"),
+    os.getenv("GEMINI_API_KEY_7"),
 ]
-API_KEYS = [k for k in _API_KEYS if k]  # drop any missing/None keys
+API_KEYS = [k for k in _API_KEYS if k]
 
 if not API_KEYS:
     raise RuntimeError("No Gemini API keys found. Set GEMINI_API_KEY_1 in your .env")
 
-# Shuffle on startup so load is spread across keys
 random.shuffle(API_KEYS)
 print(f"[NeuroSEO] Loaded {len(API_KEYS)} Gemini API key(s).")
 
-MODEL_NAME = "gemini-2.0-flash-exp"  # updated — gemini-3-flash-preview is not a valid model name
+MODEL_NAME = "gemini-1.5-flash"
 
 def call_gemini(prompt: str) -> str:
-    """Try each API key in order. Hops to the next on any error."""
     last_error = None
     for i, key in enumerate(API_KEYS):
         try:
@@ -133,6 +135,8 @@ async def analyze_sandbox(request: SandboxRequest):
         raw_text = call_gemini(prompt).strip()
         if "```json" in raw_text:
             raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw_text:
+            raw_text = raw_text.split("```")[1].split("```")[0].strip()
         return json.loads(raw_text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
