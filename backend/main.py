@@ -1,6 +1,7 @@
 import os
 import json
 import httpx
+import random
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -9,20 +10,57 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 load_dotenv()
+
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# --- FALLBACK CHAIN SETUP ---
+_API_KEYS = [
+    os.getenv("GEMINI_API_KEY_1"),
+    os.getenv("GEMINI_API_KEY_2"),
+    os.getenv("GEMINI_API_KEY_3"),
+]
+API_KEYS = [k for k in _API_KEYS if k]  # drop any missing/None keys
 
-# --- UPDATED TO GEMINI 3 FLASH (FROM YOUR SCREENSHOT) ---
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-3-flash-preview')
+if not API_KEYS:
+    raise RuntimeError("No Gemini API keys found. Set GEMINI_API_KEY_1 in your .env")
 
+# Shuffle on startup so load is spread across keys
+random.shuffle(API_KEYS)
+print(f"[NeuroSEO] Loaded {len(API_KEYS)} Gemini API key(s).")
+
+MODEL_NAME = "gemini-2.0-flash-exp"  # updated — gemini-3-flash-preview is not a valid model name
+
+def call_gemini(prompt: str) -> str:
+    """Try each API key in order. Hops to the next on any error."""
+    last_error = None
+    for i, key in enumerate(API_KEYS):
+        try:
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel(MODEL_NAME)
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            print(f"[NeuroSEO] Key {i+1} failed: {type(e).__name__}: {e}")
+            last_error = e
+            continue
+    raise Exception(f"All {len(API_KEYS)} API keys exhausted. Last error: {last_error}")
+
+
+# --- MODELS ---
 class AuditRequest(BaseModel):
     url: str
 
 class SandboxRequest(BaseModel):
     code_content: str
 
+
+# --- SCRAPER ---
 async def scrape_deep_data(url: str):
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
@@ -36,13 +74,15 @@ async def scrape_deep_data(url: str):
                 "script_count": len(soup.find_all('script')),
                 "img_count": len(soup.find_all('img'))
             }
-    except: return {"error": "Connection failed"}
+    except Exception as e:
+        return {"error": f"Connection failed: {e}"}
 
+
+# --- ROUTES ---
 @app.post("/analyze")
 async def analyze_url(request: AuditRequest):
     site_info = await scrape_deep_data(request.url)
-    
-    # HEAVY PROMPT WITH EXAMPLES
+
     prompt = f"""
     You are the NEURO-SEO TITAN. Analyze this site data: {json.dumps(site_info)}
     
@@ -64,41 +104,39 @@ async def analyze_url(request: AuditRequest):
       "growth": {{ "trends": [24 random unique ints mapping a growth curve], "war_room_battle": "str", "defense_matrix": "str" }},
       "health": {{ "sandbox_warning": "str", "safety_score": 85 }}
     }}
-
     CRITICAL RULES:
     1. SCORES: Must be UNIQUE integers (not all the same) based on how bad the site is.
     2. AUDIT: Every category must have exactly 3 objects.
     3. MITIGATION: Do not use generic text. Provide the exact HTML/JS/CSS code the user needs.
     """
-
     try:
-        response = model.generate_content(prompt)
-        raw_text = response.text.strip().replace('```json', '').replace('```', '')
+        raw_text = call_gemini(prompt).strip().replace('```json', '').replace('```', '')
         return json.loads(raw_text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/sandbox")
 async def analyze_sandbox(request: SandboxRequest):
+    prompt = f"""
+    Analyze this code snippet for SEO risks: {request.code_content}
+    Return ONLY a JSON object:
+    {{
+      "sandbox_warning": "Technical warning string",
+      "safety_score": integer 0-100,
+      "impact_lcp": "percentage string",
+      "impact_dom": "nodes count string",
+      "neural_fix": "Corrected code snippet"
+    }}
+    """
     try:
-        prompt = f"""
-        Analyze this code snippet for SEO risks: {request.code_content}
-        Return ONLY a JSON object:
-        {{
-          "sandbox_warning": "Technical warning string",
-          "safety_score": integer 0-100,
-          "impact_lcp": "percentage string",
-          "impact_dom": "nodes count string",
-          "neural_fix": "Corrected code snippet"
-        }}
-        """
-        response = model.generate_content(prompt)
-        raw_text = response.text.strip()
+        raw_text = call_gemini(prompt).strip()
         if "```json" in raw_text:
             raw_text = raw_text.split("```json")[1].split("```")[0].strip()
         return json.loads(raw_text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn
