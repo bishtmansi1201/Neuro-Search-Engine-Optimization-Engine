@@ -168,7 +168,7 @@ export default function NeuralEngineApp() {
     setHasData(false);
     setSelectedMetric(null);
     try {
-      const res = await fetch("http://localhost:8000/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+      const res = await fetch("https://neuro-search-engine-optimization-engine.onrender.com/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
       const data = await res.json();
       setLiveAuditData(data);
       setHasData(true);
@@ -203,7 +203,7 @@ const HealthPage = ({ data }: { data: any }) => {
     if(!code) return;
     setLoading(true);
     try {
-      const response = await fetch("http://localhost:8000/sandbox", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code_content: code }) });
+      const response = await fetch("https://neuro-search-engine-optimization-engine.onrender.com/sandbox", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code_content: code }) });
       const result = await response.json();
       setRes(result);
     } catch (e) { alert("Sandbox Failed"); }
